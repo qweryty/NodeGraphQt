@@ -144,6 +144,12 @@ class PropSlider(BaseProperty):
     def get_value(self):
         return self._spnbox.value()
 
+    def get_min(self):
+        return self._spinbox.getMinimum()
+
+    def get_max(self):
+        return self._spinbox.getMaximum()
+
     def set_value(self, value):
         if value != self.get_value():
             self._block = True
@@ -598,6 +604,12 @@ class _ValueSliderEdit(QtWidgets.QWidget):
         elif value > _max and self._slider.value() != _max:
             self._slider.setValue(_max)
 
+    def get_min(self):
+        return self._slider.getMinimum()
+
+    def get_max(self):
+        return self._slider.getMaximum()
+
     def set_min(self, value=0):
         self._slider.setMinimum(int(value * self._mul))
 
@@ -911,6 +923,7 @@ class NodePropWidget(QtWidgets.QWidget):
             value (object): new value.
         """
         self.property_changed.emit(self.__node_id, name, value)
+        self._update_dynamic_props(exclude=[name])
 
     def _read_node(self, node):
         """
@@ -919,15 +932,15 @@ class NodePropWidget(QtWidgets.QWidget):
         Args:
             node (NodeGraphQt.BaseNode): node class.
         """
-        model = node.model
+        self._node_model = node.model
         graph_model = node.graph.model
 
         common_props = graph_model.get_node_common_properties(node.type_)
 
         # sort tabs and properties.
         tab_mapping = defaultdict(list)
-        for prop_name, prop_val in model.custom_properties.items():
-            tab_name = model.get_tab_name(prop_name)
+        for prop_name, prop_val in self._node_model.custom_properties.items():
+            tab_name = self._node_model.get_tab_name(prop_name)
             tab_mapping[tab_name].append((prop_name, prop_val))
 
         # add tabs.
@@ -935,23 +948,34 @@ class NodePropWidget(QtWidgets.QWidget):
             if tab != 'Node':
                 self.add_tab(tab)
 
+        self._dynamic_props = {}
         # populate tab properties.
         for tab in sorted(tab_mapping.keys()):
             prop_window = self.__tab_windows[tab]
             for prop_name, value in tab_mapping[tab]:
-                wid_type = model.get_widget_type(prop_name)
+                wid_type = self._node_model.get_widget_type(prop_name)
                 if wid_type == 0:
                     continue
 
                 _WidgetClass = WIDGET_MAP.get(wid_type)
                 widget = _WidgetClass()
-                if prop_name in common_props.keys():
-                    if 'items' in common_props[prop_name].keys():
+                if prop_name in common_props:
+                    if 'items' in common_props[prop_name]:
                         widget.set_items(common_props[prop_name]['items'])
-                    if 'range' in common_props[prop_name].keys():
+                    if 'range' in common_props[prop_name]:
                         prop_range = common_props[prop_name]['range']
                         widget.set_min(prop_range[0])
                         widget.set_max(prop_range[1])
+                    if 'dynamic' in common_props[prop_name] and \
+                            common_props[prop_name]['dynamic']:
+                        self._dynamic_props[prop_name] = widget
+                        prop_range = self._node_model.get_dynamic_range(prop_name)
+                        if prop_range:
+                            widget.set_min(prop_range[0])
+                            widget.set_max(prop_range[1])
+                        prop_items = self._node_model.get_dynamic_items(prop_name)
+                        if prop_items is not None:
+                            widget.set_items(prop_items)
 
                 prop_window.add_widget(prop_name, widget, value,
                                        prop_name.replace('_', ' '))
@@ -962,18 +986,34 @@ class NodePropWidget(QtWidgets.QWidget):
         default_props = ['color', 'text_color', 'disabled', 'id']
         prop_window = self.__tab_windows['Node']
         for prop_name in default_props:
-            wid_type = model.get_widget_type(prop_name)
+            wid_type = self._node_model.get_widget_type(prop_name)
             _WidgetClass = WIDGET_MAP.get(wid_type)
 
             widget = _WidgetClass()
             prop_window.add_widget(prop_name,
                                    widget,
-                                   model.get_property(prop_name),
+                                   self._node_model.get_property(prop_name),
                                    prop_name.replace('_', ' '))
 
             widget.value_changed.connect(self._on_property_changed)
 
-        self.type_wgt.setText(model.get_property('type_'))
+        self.type_wgt.setText(self._node_model.get_property('type_'))
+
+    def _update_dynamic_props(self, exclude=None):
+        if exclude is None:
+            exclude = []
+        for prop_name, widget in self._dynamic_props.items():
+            if prop_name in exclude:
+                continue
+
+            prop_range = self._node_model.get_dynamic_range(prop_name)
+            prop_items = self._node_model.get_dynamic_items(prop_name)
+            if prop_range and \
+                    (widget.get_min() != prop_range[0] or widget.get_max() != prop_range[1]):
+                widget.set_min(prop_range[0])
+                widget.set_max(prop_range[1])
+            if prop_items is not None and widget.items() != prop_items:
+                widget.set_items(prop_items)
 
     def node_id(self):
         """

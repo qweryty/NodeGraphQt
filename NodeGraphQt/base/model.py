@@ -87,6 +87,9 @@ class NodeModel(object):
         # Custom
         self._custom_prop = {}
 
+        # Limits
+        self._dynamic_properties = {}
+
         # node graph model set at node added time.
         self._graph_model = None
 
@@ -119,7 +122,7 @@ class NodeModel(object):
             self.__class__.__name__, self.name, self.id)
 
     def add_property(self, name, value, items=None, range=None,
-                     widget_type=NODE_PROP, tab=None):
+                     widget_type=NODE_PROP, tab=None, dynamic=False):
         """
         add custom property.
 
@@ -130,6 +133,8 @@ class NodeModel(object):
             range (tuple)): min, max values used by NODE_PROP_SLIDER.
             widget_type (int): widget type flag.
             tab (str): widget tab name.
+            dynamic (bool): if True "items" or "range"
+                will be determined dynamically individually for each node
         """
         tab = tab or 'Properties'
 
@@ -144,7 +149,7 @@ class NodeModel(object):
 
         if self._graph_model is None:
             self._TEMP_property_widget_types[name] = widget_type
-            self._TEMP_property_attrs[name] = {'tab': tab}
+            self._TEMP_property_attrs[name] = {'tab': tab, 'dynamic': dynamic}
             if items:
                 self._TEMP_property_attrs[name]['items'] = items
             if range:
@@ -152,12 +157,17 @@ class NodeModel(object):
         else:
             attrs = {self.type_: {name: {
                 'widget_type': widget_type,
-                'tab': tab
+                'tab': tab,
+                'dynamic': dynamic,
             }}}
             if items:
                 attrs[self.type_][name]['items'] = items
+                if dynamic:
+                    self._dynamic_properties[name]['items'] = items
             if range:
                 attrs[self.type_][name]['range'] = range
+                if dynamic:
+                    self._dynamic_properties[name]['range'] = range
             self._graph_model.set_node_common_properties(attrs)
 
     def set_property(self, name, value):
@@ -172,6 +182,22 @@ class NodeModel(object):
         if name in self.properties.keys():
             return self.properties[name]
         return self._custom_prop.get(name)
+
+    def get_dynamic_range(self, name):
+        return self._dynamic_properties.get(name, {}).get('range')
+
+    def set_dynamic_range(self, name, minimum, maximum):
+        if name not in self._dynamic_properties:
+            self._dynamic_properties[name] = {}
+        self._dynamic_properties[name]['range'] = (minimum, maximum)
+
+    def get_dynamic_items(self, name):
+        return self._dynamic_properties.get(name, {}).get('items')
+
+    def set_dynamic_items(self, name, value):
+        if name not in self._dynamic_properties:
+            self._dynamic_properties[name] = {}
+        self._dynamic_properties[name]['items'] = value
 
     def get_widget_type(self, name):
         model = self._graph_model
@@ -249,6 +275,7 @@ class NodeModel(object):
         """
         node_dict = self.__dict__.copy()
         node_id = node_dict.pop('id')
+        node_dict.pop('_dynamic_properties')
 
         inputs = {}
         outputs = {}
